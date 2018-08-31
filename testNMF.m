@@ -9,8 +9,8 @@ V = V+randn(size(V))*20;
 
 W = randn(size(Wg));
 H = randn(size(Hg'));
-[W, H, loss_comp, time] = nmf_kl_admm(V, W, H, 2, 1, 500);
-loss_comp = loss_comp./(norm(V,'fro').^2);
+% [W, H, loss_comp, time] = nmf_kl_admm(V, W, H, 2, 1, 500);
+% loss_comp = loss_comp./(norm(V,'fro').^2);
 
 [W,D,H, loss_madmm] = nmf(V,3, 'admm_manifold');
 loss_madmm = loss_madmm./(norm(V,'fro').^2);
