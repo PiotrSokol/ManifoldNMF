@@ -51,6 +51,7 @@ switch type
         H = Hplus;
     case 'admm_manifold'
         [W,D,H] = initialize(V,k);
+        H = H';
         Wplus = max(W,0);
         Dplus = max(D,0);
         Hplus = max(H,0);
@@ -72,8 +73,8 @@ switch type
             optimizer.D.problem.egrad = @(d)optimizer.D.egrad(W,d,Z,Dplus,LambdaD,LambdaZ);
             D = rlbfgs(optimizer.D.problem, D, optimizer.opts);
             %% H update
-            optimizer.H.problem.cost = @(h)optimizer.H.cost(X,Z,h,Hplus,LambdaH,LambdaZ);
-            optimizer.H.problem.egrad = @(h)optimizer.H.egrad(X,Z,h,Hplus,LambdaH,LambdaZ);
+            optimizer.H.problem.cost = @(h)optimizer.H.cost(X,Z,h,Hplus,LambdaH,LambdaX);
+            optimizer.H.problem.egrad = @(h)optimizer.H.egrad(X,Z,h,Hplus,LambdaH,LambdaX);
             H = rlbfgs(optimizer.H.problem, H, optimizer.opts);
             %% X and Z update
             for  j = 1:size(X(:,0))
@@ -223,21 +224,21 @@ function optimizer = optimizer_factory(V,k, rho)
     
     optimizer.W.problem.M = obliquefactory(d,k);
     optimizer.W.cost = @(W,D,Z,Wplus,LambdaW,LambdaZ)...
-        0.5*rho*( norm(Z - W*D+LambdaZ,'fro').^2 + norm(W-Wplus+LambdaW, 'fro') );
+        0.5*rho*( norm(Z - W*D+LambdaZ,'fro').^2 + norm(W-Wplus+LambdaW, 'fro').^2 );
     optimizer.W.egrad = @(W,D,Z,Wplus,LambdaW,LambdaZ)...
         rho*( W- (Z- W*D + LambdaZ)*D' - Wplus + LambdaW);
     
     optimizer.H.problem.M = obliquefactory(n,k);
     optimizer.H.cost = @(X,Z,H,Hplus,LambdaH,LambdaX)...
-        0.5*rho*( norm(X - Z*H+LambdaX,'fro').^2 + norm(H-Hplus+LambdaH,'fro') );
+        0.5*rho*( norm(X - Z*H+LambdaX,'fro').^2 + norm(H-Hplus+LambdaH,'fro').^2 );
     optimizer.H.egrad = @(X,Z,H,Hplus,LambdaH,LambdaX)...
         rho*( H- Z'*(X- Z*H + LambdaX) - Hplus + LambdaH);
 
     optimizer.D.problem.M = euclideanfactory(k,k);
     optimizer.D.cost = @(W,D,Z, Dplus, LambdaD, LambdaZ)...
-        0.5*rho*( norm(Z - W*D+LambdaZ,'fro').^2 + norm(D-Dplus+LambdaD) );
-    optimizer.D.egrad = @(W,D,Z,Wplus,LambdaD,LambdaZ)...
-        rho*diag( ( D- W'*(Z- W*D + LambdaZ) - Dplus + LambdaD) );
+        0.5*rho*( norm(Z - W*D+LambdaZ,'fro').^2 + norm(D-Dplus+LambdaD, 'fro').^2 );
+    optimizer.D.egrad = @(W,D,Z,Dplus,LambdaD,LambdaZ)...
+        rho*diag( diag( ( D- W'*(Z- W*D + LambdaZ) - Dplus + LambdaD) ) );
     
     
     
