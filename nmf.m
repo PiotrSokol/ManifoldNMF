@@ -77,12 +77,12 @@ switch type
             optimizer.H.problem.egrad = @(h)optimizer.H.egrad(X,Z,h,Hplus,LambdaH,LambdaX);
             H = rlbfgs(optimizer.H.problem, H, optimizer.opts);
             %% X and Z update
-            for  j = 1:size(X(:,0))
+            for  j = 1:size(X, 1)
                 %Problem splits into a QP for each row of X and Z
                 %Can be solved in parallel
                 
                 %Construct symmetric matrix H
-                S = [ (1+rho/2)*eye(size(X,2)), -rho*H'; -rho*H',rho*(eye(size(Z,2))+H*H')];
+                S = [ (1+rho/2)*eye(size(X,2)), -rho*H'; -rho*H,rho*(eye(size(Z,2))+H*H')];
                 f = [ rho*LambdaX(j,:)'-V(j,:)';rho*(LambdaZ(j,:)'-H*LambdaX(j,:)' - D'*W(j,:)') ];
                 
                 x_optim = -(S\f)';
@@ -93,7 +93,6 @@ switch type
                 
             end
             
-            X = (1+rho)^(-1).*(V + rho*(W*D*H' - LambdaX));
             %% W_+, D_+, H_+
             Wplus = max(W + LambdaW, 0); 
             Dplus = max(D + LambdaD, 0);
@@ -105,7 +104,7 @@ switch type
             LambdaX = LambdaX + (X - Z*H);
             LambdaZ = LambdaZ + (Z - W*D);
             
-            loss(i) = cost(V,W,D,H);
+            loss(i) = cost2(V,W,D,H);
         end
         W = Wplus;
         H = Hplus;
@@ -168,6 +167,11 @@ end
 %%
 function c = cost(VV,WW,SS,HH)
     c = 0.5 * norm(VV-WW*SS*HH', 'fro').^2;
+end
+
+%%
+function c = cost2(VV,WW,SS,HH)
+    c = 0.5 * norm(VV-WW*SS*HH, 'fro').^2;
 end
 %%
 function w_hat = manifold_uW(WW, VV,SS,HH)
