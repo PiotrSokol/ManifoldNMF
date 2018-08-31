@@ -54,37 +54,55 @@ switch type
         Wplus = max(W,0);
         Dplus = max(D,0);
         Hplus = max(H,0);
-        X = W*D*H';
+        X = W*D*H;
+        Z = W*D;
         LambdaW = zeros(size(W));
         LambdaD = zeros(size(D));
         LambdaH = zeros(size(H));
         LambdaX = zeros(size(X));
-        
+        LambdaZ = zeros(size(Z));
         optimizer = optimizer_factory(V,k, rho);
         for i = 1:10
             %% W update         
-            optimizer.W.problem.cost = @(w)optimizer.W.cost(X,w,D,H,Wplus,LambdaW);
-            optimizer.W.problem.egrad = @(w)optimizer.W.egrad(X,w,D,H,Wplus,LambdaW);
+            optimizer.W.problem.cost = @(w)optimizer.W.cost(w,D,Z,Wplus,LambdaW,LambdaZ);
+            optimizer.W.problem.egrad = @(w)optimizer.W.egrad(w,D,Z,Wplus,LambdaW,LambdaZ);
             W = rlbfgs(optimizer.W.problem, W, optimizer.opts);
             %% D update
-            optimizer.D.problem.cost = @(d)optimizer.D.cost(X,W,d,H,Dplus,LambdaD);
-            optimizer.D.problem.egrad = @(d)optimizer.D.egrad(X,W,d,H,Dplus,LambdaD);
+            optimizer.D.problem.cost = @(d)optimizer.D.cost(W,d,Z,Dplus,LambdaD,LambdaZ);
+            optimizer.D.problem.egrad = @(d)optimizer.D.egrad(W,d,Z,Dplus,LambdaD,LambdaZ);
             D = rlbfgs(optimizer.D.problem, D, optimizer.opts);
             %% H update
-            optimizer.H.problem.cost = @(h)optimizer.H.cost(X,W,D,h,Hplus,LambdaH);
-            optimizer.H.problem.egrad = @(h)optimizer.H.egrad(X,W,D,h,Hplus,LambdaH);
+            optimizer.H.problem.cost = @(h)optimizer.H.cost(X,Z,h,Hplus,LambdaH,LambdaZ);
+            optimizer.H.problem.egrad = @(h)optimizer.H.egrad(X,Z,h,Hplus,LambdaH,LambdaZ);
             H = rlbfgs(optimizer.H.problem, H, optimizer.opts);
-            %% X update
+            %% X and Z update
+            for  j = 1:size(X(:,0))
+                %Problem splits into a QP for each row of X and Z
+                %Can be solved in parallel
+                
+                %Construct symmetric matrix H
+                S = [ (1+rho/2)*eye(size(X,2)), -rho*H'; -rho*H',rho*(eye(size(Z,2))+H*H')];
+                f = [ rho*LambdaX(j,:)'-V(j,:)';rho*(LambdaZ(j,:)'-H*LambdaX(j,:)' - D'*W(j,:)') ];
+                
+                x_optim = -(S\f)';
+                
+                X(j,:) = x_optim(1:size(X,2));
+                Z(j,:) = x_optim( size(X,2)+1:end);
+                
+                
+            end
+            
             X = (1+rho)^(-1).*(V + rho*(W*D*H' - LambdaX));
             %% W_+, D_+, H_+
-            Wplus = max(W+LambdaW, 0); 
+            Wplus = max(W + LambdaW, 0); 
             Dplus = max(D + LambdaD, 0);
             Hplus = max(H + LambdaH, 0);
             %% Dual update
             LambdaW = LambdaW + (W - Wplus);
             LambdaD = LambdaD + (D - Dplus);
             LambdaH = LambdaH + (H - Hplus);
-            LambdaX = LambdaX + (X - W*D*H');
+            LambdaX = LambdaX + (X - Z*H);
+            LambdaZ = LambdaZ + (Z - W*D);
             
             loss(i) = cost(V,W,D,H);
         end
@@ -204,24 +222,30 @@ function optimizer = optimizer_factory(V,k, rho)
     [d,n] = size(V);
     
     optimizer.W.problem.M = obliquefactory(d,k);
-    
-    optimizer.W.cost = @(X,W,D,H,Wplus,LambdaW)...
-        ( cost(X, W, D, H) + rho*norm(W - Wplus + LambdaW,'fro').^2);
-    optimizer.W.egrad =@(X,W,D,H,Wplus,LambdaW)...
-        (rho*(W-Wplus+LambdaW) - (X - W*D*H')*H*D');
-%     optimizer.W.problem.cost = @(W) optimizer.W.cost(X,W,D,H,Wplus,LambdaW);
+    optimizer.W.cost = @(W,D,Z,Wplus,LambdaW,LambdaZ)...
+        0.5*rho*( norm(Z - W*D+LambdaZ,'fro').^2 + norm(W-Wplus+LambdaW, 'fro') );
+    optimizer.W.egrad = @(W,D,Z,Wplus,LambdaW,LambdaZ)...
+        rho*( W- (Z- W*D + LambdaZ)*D' - Wplus + LambdaW);
     
     optimizer.H.problem.M = obliquefactory(n,k);
-    optimizer.H.cost = @(X,W,D,H,Hplus,LambdaH)...
-        ( cost(X, W, D, H) + rho*norm(H - Hplus + LambdaH,'fro').^2);
-    optimizer.H.egrad =@(X,W,D,H,Hplus,LambdaH)...
-        (rho*(H-Hplus+LambdaH) - (X'  - H*D'*W')*W*D);
-%     optimizer.H.problem.cost = @(H) optimizer.H.cost(X,W,D,H,Hplus,LambdaH);
+    optimizer.H.cost = @(X,Z,H,Hplus,LambdaH,LambdaX)...
+        0.5*rho*( norm(X - Z*H+LambdaX,'fro').^2 + norm(H-Hplus+LambdaH,'fro') );
+    optimizer.H.egrad = @(X,Z,H,Hplus,LambdaH,LambdaX)...
+        rho*( H- Z'*(X- Z*H + LambdaX) - Hplus + LambdaH);
+
     optimizer.D.problem.M = euclideanfactory(k,k);
-    optimizer.D.cost = @(X,W,D,H,Dplus,LambdaD)...
-        ( cost(X, W, D, H) + rho*norm(D - Dplus + LambdaD,'fro').^2);
-    optimizer.D.egrad = @(X,W,D,H,Dplus,LambdaD)...
-        diag(diag(((D+LambdaD - Dplus) - W'*(X-W*D*H')*H)));
+    optimizer.D.cost = @(W,D,Z, Dplus, LambdaD, LambdaZ)...
+        0.5*rho*( norm(Z - W*D+LambdaZ,'fro').^2 + norm(D-Dplus+LambdaD) );
+    optimizer.D.egrad = @(W,D,Z,Wplus,LambdaD,LambdaZ)...
+        rho*diag( ( D- W'*(Z- W*D + LambdaZ) - Dplus + LambdaD) );
+    
+    
+    
+    
+%     optimizer.D.cost = @(X,W,D,H,Dplus,LambdaD)...
+%         ( cost(X, W, D, H) + rho*norm(D - Dplus + LambdaD,'fro').^2);
+%     optimizer.D.egrad = @(X,W,D,H,Dplus,LambdaD)...
+%         diag(diag(((D+LambdaD - Dplus) - W'*(X-W*D*H')*H)));
 %     optimizer.H.problem.cost = @(H) optimizer.H.cost(X,W,D,H,Hplus,LambdaH);
     optimizer.opts.tolgradnorm = 1e-4;
     optimizer.opts.verbosity = 0;
